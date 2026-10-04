@@ -5,7 +5,7 @@ caching it before CV is not leakage. Anything fitted across images (scaling, cod
 later, inside the CV folds.
 
 Usage:
-    python scripts/extract_features.py --dataset montgomery --mask none
+    python scripts/extract_features.py --dataset montgomery --mask lung
 """
 import argparse
 import json
@@ -14,7 +14,6 @@ import zlib
 from dataclasses import asdict
 from pathlib import Path
 
-import cv2
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
@@ -22,25 +21,17 @@ from joblib import Parallel, delayed
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tbshift import preprocess  # noqa: E402
+from tbshift.data import images  # noqa: E402
 from tbshift.features import shape_context as sc  # noqa: E402
 from tbshift.features import texture as tx  # noqa: E402
 from tbshift.provenance import DATA_ROOT, _git  # noqa: E402
 
 
 def _one(row: dict, mask_mode: str, size: int, scp, txp) -> dict:
-    img = preprocess.prepare(row["path"], size=size)
-    if mask_mode == "none":
-        mask = None
-    else:
-        # Automatic masks from scripts/segment_lungs.py, the same model for every dataset.
-        # Manual masks are never model inputs (they exist for Montgomery only).
-        mpath = DATA_ROOT / "masks" / f"{row['dataset']}_s{size}" / f"{row['image_id']}.png"
-        m = cv2.imread(str(mpath), cv2.IMREAD_GRAYSCALE)
-        if m is None:
-            raise FileNotFoundError(f"{mpath}: run scripts/segment_lungs.py first")
-        mask = m > 127
-        if not mask.any():
-            mask = None  # segmentation failure: fall back to the whole image (counted in params)
+    # Same cached pixels and masks as every other model family (scripts/prepare_images.py and
+    # scripts/segment_lungs.py). Manual masks are never model inputs.
+    img = images.read_prepared(row["dataset"], row["image_id"], size)
+    mask = images.read_mask(row["dataset"], row["image_id"], size) if mask_mode == "lung" else None
     seed = zlib.crc32(row["image_id"].encode())
     s = sc.extract(img, mask, scp, seed)
     t = tx.extract(img, mask, txp)
@@ -52,7 +43,8 @@ def _one(row: dict, mask_mode: str, size: int, scp, txp) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", required=True)
-    ap.add_argument("--mask", default="none", choices=["none", "auto"])
+    ap.add_argument("--mask", required=True, choices=["lung", "none"],
+                    help="lung = automatic lung mask (primary); none = whole image (shortcut ablation)")
     ap.add_argument("--size", type=int, default=preprocess.DEFAULT_SIZE)
     ap.add_argument("--limit", type=int, default=0, help="debug: first N images only")
     ap.add_argument("--jobs", type=int, default=-1)

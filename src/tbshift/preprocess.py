@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 
 DEFAULT_SIZE = 512
+THORACIC_DILATION_PX = 15  # lung mask is grown by this much to form the "thoracic region"
 
 
 def load_gray(path: str | Path) -> np.ndarray:
@@ -77,3 +78,18 @@ def load_mask(paths: list[str | Path], size: int = DEFAULT_SIZE) -> np.ndarray:
         m = m > 127
         out = m if out is None else (out | m)
     return resize_mask(out, size)
+
+
+def thoracic_region(mask: np.ndarray, dilation_px: int = THORACIC_DILATION_PX) -> np.ndarray:
+    """Lung mask dilated into the surrounding thoracic region (ribs, pleura, mediastinal edge)."""
+    from scipy import ndimage
+    m = mask.astype(bool)
+    return ndimage.binary_dilation(m, iterations=dilation_px) if dilation_px > 0 else m
+
+
+def apply_region(img: np.ndarray, mask: np.ndarray | None,
+                 dilation_px: int = THORACIC_DILATION_PX) -> np.ndarray:
+    """Zero everything outside the thoracic region. mask=None returns the image unchanged."""
+    if mask is None:
+        return img
+    return img * thoracic_region(mask, dilation_px)

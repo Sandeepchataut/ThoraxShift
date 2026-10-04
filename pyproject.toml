@@ -8,6 +8,26 @@ version = "0.1.0"
 description = "Cross-site robustness of hand-crafted vs deep representations for TB chest X-ray screening"
 license = { text = "MIT" }
 requires-python = ">=3.11,<3.12"
+# Direct dependencies, pinned. requirements.txt is the full lock of the tested environment.
+dependencies = [
+    "numpy==1.26.4",
+    "scipy==1.11.4",
+    "pandas==2.1.4",
+    "scikit-learn==1.4.2",
+    "scikit-image==0.22.0",
+    "opencv-python-headless==4.9.0.80",
+    "matplotlib==3.8.4",
+    "joblib==1.4.2",
+    "requests==2.32.3",
+    "tqdm==4.66.4",
+    "PyYAML==6.0.1",
+    "torch==2.3.1",
+    "torchvision==0.18.1",
+    "torchxrayvision==1.2.4",
+]
+
+[project.optional-dependencies]
+test = ["pytest==8.2.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

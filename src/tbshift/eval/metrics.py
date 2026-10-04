@@ -178,3 +178,89 @@ def threshold_metrics(y_true, scores, threshold: float) -> dict:
         out[name] = k / n if n else float("nan")
         out[f"{name}_ci"] = wilson_ci(k, n)
     return out
+
+
+# ---------------------------------------------------------------------------------------------
+# Paired bootstrap on a shared set of images, transfer gaps, multiple-comparison correction
+# ---------------------------------------------------------------------------------------------
+
+def _auc(y, s) -> float:
+    from sklearn.metrics import roc_auc_score
+    return float(roc_auc_score(y, s))
+
+
+def paired_bootstrap(y_true, score_vectors, statistic, n_boot: int = 2000, seed: int = 0,
+                     alpha: float = 0.05) -> dict:
+    """Stratified bootstrap of statistic(y, *score_vectors) over a shared set of images.
+
+    Every score vector is resampled with the SAME indices, so correlation between models (or
+    between in-domain and cross-domain scores of the same images) is preserved.
+    Returns the point estimate, a percentile CI, and a two-sided bootstrap p-value for the
+    hypothesis statistic == 0.
+    """
+    y = _check_binary(y_true)
+    vecs = [np.asarray(v, dtype=float) for v in score_vectors]
+    if any(len(v) != len(y) for v in vecs):
+        raise ValueError("all score vectors must align with y_true")
+    point = float(statistic(y, *vecs))
+    rng = np.random.default_rng(seed)
+    boots = np.array([statistic(y[i], *[v[i] for v in vecs])
+                      for i in stratified_bootstrap_indices(y, n_boot, rng)], dtype=float)
+    lo, hi = np.quantile(boots, [alpha / 2, 1 - alpha / 2])
+    p = float(min(1.0, 2 * min((boots <= 0).mean(), (boots >= 0).mean())))
+    return {"estimate": point, "ci_low": float(lo), "ci_high": float(hi), "p_boot": p,
+            "n_boot": n_boot, "seed": seed}
+
+
+def auc_difference(y_true, scores_a, scores_b, n_boot: int = 2000, seed: int = 0) -> dict:
+    """AUC(a) - AUC(b) on the same images: paired DeLong test plus paired bootstrap CI."""
+    d = delong_test(y_true, scores_a, scores_b)
+    b = paired_bootstrap(y_true, [scores_a, scores_b], lambda y, a, c: _auc(y, a) - _auc(y, c),
+                         n_boot, seed)
+    return {"auc_a": d["auc_a"], "auc_b": d["auc_b"], "diff": d["diff"], "delong_z": d["z"],
+            "delong_p": d["p"], "boot_ci_low": b["ci_low"], "boot_ci_high": b["ci_high"],
+            "boot_p": b["p_boot"]}
+
+
+def transfer_gap(y_target, scores_in_domain, scores_cross, n_boot: int = 2000, seed: int = 0) -> dict:
+    """Transfer gap on target T: AUC_in(T) - AUC_cross(S->T), both on the same T images.
+
+    scores_in_domain: out-of-fold scores on T from in-domain CV on T.
+    scores_cross: scores on T from a model trained on S.
+    Also returns the relative gap (AUC_in - AUC_cross) / (AUC_in - 0.5), i.e. the fraction of
+    above-chance in-domain performance lost under transfer.
+    """
+    absolute = paired_bootstrap(y_target, [scores_in_domain, scores_cross],
+                                lambda y, a, c: _auc(y, a) - _auc(y, c), n_boot, seed)
+
+    def rel(y, a, c):
+        auc_in = _auc(y, a)
+        return (auc_in - _auc(y, c)) / (auc_in - 0.5) if auc_in > 0.5 else np.nan
+
+    relative = paired_bootstrap(y_target, [scores_in_domain, scores_cross], rel, n_boot, seed)
+    return {"auc_in_domain": _auc(y_target, scores_in_domain), "auc_cross": _auc(y_target, scores_cross),
+            "gap": absolute, "relative_gap": relative}
+
+
+def gap_difference(y_target, in_a, cross_a, in_b, cross_b, n_boot: int = 2000, seed: int = 0) -> dict:
+    """(gap of model A) - (gap of model B) on the same target images, paired bootstrap."""
+    def stat(y, ia, ca, ib, cb):
+        return (_auc(y, ia) - _auc(y, ca)) - (_auc(y, ib) - _auc(y, cb))
+    return paired_bootstrap(y_target, [in_a, cross_a, in_b, cross_b], stat, n_boot, seed)
+
+
+def holm(pvalues) -> np.ndarray:
+    """Holm-Bonferroni adjusted p-values (step-down, monotone, capped at 1). NaNs pass through."""
+    p = np.asarray(pvalues, dtype=float)
+    out = np.full_like(p, np.nan)
+    ok = ~np.isnan(p)
+    pv = p[ok]
+    m = len(pv)
+    order = np.argsort(pv)
+    adj = np.empty(m)
+    running = 0.0
+    for rank, idx in enumerate(order):
+        running = max(running, (m - rank) * pv[idx])
+        adj[idx] = min(1.0, running)
+    out[ok] = adj
+    return out

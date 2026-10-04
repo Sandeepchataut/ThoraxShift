@@ -18,7 +18,7 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tbshift import preprocess  # noqa: E402
-from tbshift.provenance import DATA_ROOT, new_run, write_json  # noqa: E402
+from tbshift.provenance import DATA_ROOT, new_run, resolve_data_path, write_json  # noqa: E402
 from tbshift.segmentation import LungSegmenter, dice  # noqa: E402
 
 
@@ -40,27 +40,29 @@ def main() -> None:
     out = mask_dir(args.dataset, args.size)
     out.mkdir(parents=True, exist_ok=True)
     seg = LungSegmenter()
+    print(f"segmenter weights sha256: {seg.weights_sha256}")
     rows = []
     for r in tqdm(df.to_dict("records"), desc=f"segment {args.dataset}"):
         dest = out / f"{r['image_id']}.png"
         if dest.exists():
             pred = cv2.imread(str(dest), cv2.IMREAD_GRAYSCALE) > 127
         else:
-            img = preprocess.resize(preprocess.normalise(preprocess.load_gray(r["path"])), args.size)
+            img = preprocess.resize(preprocess.normalise(preprocess.load_gray(resolve_data_path(r["path"]))), args.size)
             pred = seg(img)
             cv2.imwrite(str(dest), pred.astype(np.uint8) * 255)
         row = {"image_id": r["image_id"], "label": r["label"], "mask_area_frac": float(pred.mean())}
         if args.evaluate:
             if not isinstance(r.get("mask_paths"), str) or not r["mask_paths"]:
                 raise SystemExit(f"{args.dataset} has no manual masks; --evaluate not possible")
-            gt = preprocess.load_mask(r["mask_paths"].split(";"), args.size)
+            gt = preprocess.load_mask([resolve_data_path(m) for m in r["mask_paths"].split(";")], args.size)
             row["dice"] = dice(pred, gt)
         rows.append(row)
 
     res = pd.DataFrame(rows)
     print(f"{len(res)} masks in {out}; empty masks: {(res.mask_area_frac == 0).sum()}")
     if args.evaluate:
-        run = new_run(f"segmentation_dice_{args.dataset}", vars(args))
+        run = new_run(f"segmentation_dice_{args.dataset}",
+                      {**vars(args), "segmenter_weights_sha256": seg.weights_sha256})
         res.to_csv(run / "per_image.csv", index=False)
         summary = {"n": len(res), "dice_mean": res.dice.mean(), "dice_median": res.dice.median(),
                    "dice_min": res.dice.min(), "dice_q05": res.dice.quantile(0.05),

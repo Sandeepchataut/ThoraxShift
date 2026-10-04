@@ -85,3 +85,47 @@ def test_youden_threshold_separates_perfectly():
 def test_single_class_rejected():
     with pytest.raises(ValueError):
         M.auc_delong_ci(np.ones(5), np.arange(5))
+
+
+def test_holm_matches_hand_computation():
+    adj = M.holm([0.01, 0.04, 0.03, 0.005])
+    # sorted: 0.005*4=0.02, 0.01*3=0.03, 0.03*2=0.06, 0.04*1=0.04 -> monotone 0.06
+    np.testing.assert_allclose(adj, [0.03, 0.06, 0.06, 0.02])
+    assert np.isnan(M.holm([0.01, np.nan])[1])
+
+
+def test_paired_bootstrap_identical_models_gives_zero_difference():
+    y, s = _data(n=200)
+    r = M.auc_difference(y, s, s, n_boot=200)
+    assert r["diff"] == 0 and r["boot_ci_low"] == 0 and r["boot_ci_high"] == 0
+    assert r["delong_p"] == 1.0
+
+
+def test_paired_bootstrap_ci_agrees_with_delong_scale():
+    y, s = _data(n=400, sep=1.0, seed=4)
+    rng = np.random.default_rng(5)
+    other = s + rng.normal(scale=1.0, size=len(y))
+    r = M.auc_difference(y, s, other, n_boot=1000)
+    # The DeLong z implies an SE; the bootstrap CI half-width should be ~1.96 * SE.
+    se = abs(r["diff"] / r["delong_z"])
+    half = (r["boot_ci_high"] - r["boot_ci_low"]) / 2
+    assert half == pytest.approx(1.96 * se, rel=0.25)
+    assert r["boot_ci_low"] < r["diff"] < r["boot_ci_high"]
+
+
+def test_transfer_gap_signs_and_relative_gap():
+    y, s_in = _data(n=300, sep=2.0, seed=6)
+    rng = np.random.default_rng(7)
+    s_cross = s_in + rng.normal(scale=2.0, size=len(y))   # degraded transfer
+    r = M.transfer_gap(y, s_in, s_cross, n_boot=300)
+    assert r["gap"]["estimate"] > 0
+    assert r["gap"]["estimate"] == pytest.approx(r["auc_in_domain"] - r["auc_cross"])
+    expected_rel = (r["auc_in_domain"] - r["auc_cross"]) / (r["auc_in_domain"] - 0.5)
+    assert r["relative_gap"]["estimate"] == pytest.approx(expected_rel)
+
+
+def test_gap_difference_zero_for_same_model():
+    y, s_in = _data(n=200, seed=8)
+    s_cross = s_in + np.random.default_rng(9).normal(size=len(y))
+    r = M.gap_difference(y, s_in, s_cross, s_in, s_cross, n_boot=100)
+    assert r["estimate"] == 0 and r["ci_low"] == 0 and r["ci_high"] == 0

@@ -22,7 +22,7 @@ class ShapeContextParams:
     r_inner: float = 0.125       # inner radius (in units of mean pairwise distance)
     r_outer: float = 2.0         # outer radius
     canny_sigma: float = 2.0
-    mask_dilation_px: int = 15   # grow the lung mask into a "thoracic" region before edges
+    mask_dilation_px: int = 15   # = preprocess.THORACIC_DILATION_PX
     grid: tuple[int, int] = (2, 2)  # spatial cells for pooling (rows, cols)
 
     @property

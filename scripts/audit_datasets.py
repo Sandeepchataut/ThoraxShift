@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from tbshift.provenance import DATA_ROOT, new_run, write_json  # noqa: E402
+from tbshift.provenance import DATA_ROOT, new_run, resolve_data_path, write_json  # noqa: E402
 
 
 def main() -> None:
@@ -26,7 +26,7 @@ def main() -> None:
     for name in args.datasets:
         df = pd.read_csv(DATA_ROOT / "manifests" / f"{name}.csv")
         for r in tqdm(df.to_dict("records"), desc=name):
-            a = cv2.imread(r["path"], cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH)
+            a = cv2.imread(str(resolve_data_path(r["path"])), cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH)
             rows.append({"dataset": name, "image_id": r["image_id"], "label": r["label"],
                          "dtype": str(a.dtype), "channels": 1 if a.ndim == 2 else a.shape[2],
                          "height": a.shape[0], "width": a.shape[1],

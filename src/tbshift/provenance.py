@@ -1,6 +1,7 @@
 """Run directories with full provenance, so every reported number traces to a real run."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -14,7 +15,23 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.environ.get("TBSHIFT_DATA", ROOT / "data"))
-RUNS_ROOT = ROOT / "outputs" / "runs"
+# Override on cloud GPU machines so runs land on persistent storage.
+RUNS_ROOT = Path(os.environ.get("TBSHIFT_RUNS", ROOT / "outputs" / "runs"))
+RAW_ROOT = DATA_ROOT / "raw"
+
+
+def resolve_data_path(p: str | Path) -> Path:
+    """Manifest paths are relative to data/raw; absolute paths are returned unchanged."""
+    p = Path(p)
+    return p if p.is_absolute() else RAW_ROOT / p
+
+
+def file_sha256(path: str | Path, chunk: int = 1 << 20) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(chunk), b""):
+            h.update(block)
+    return h.hexdigest()
 
 
 def set_seed(seed: int) -> None:

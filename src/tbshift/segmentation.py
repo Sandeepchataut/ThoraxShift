@@ -45,6 +45,8 @@ class LungSegmenter:
         self.torch = torch
         self.model = xrv.baseline_models.chestx_det.PSPNet(cache_dir=cache_dir).eval()
         self.idx = (self.model.targets.index(LEFT), self.model.targets.index(RIGHT))
+        from tbshift.provenance import file_sha256
+        self.weights_sha256 = file_sha256(self.model.weights_filename_local)
 
     def __call__(self, img01: np.ndarray, thr: float = 0.5) -> np.ndarray:
         """img01: float image in [0, 1] (normalised, before CLAHE), any square size.
