@@ -38,6 +38,8 @@ def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
+    # Required for deterministic cuBLAS kernels; must be set before CUDA initialises.
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     try:
         import torch
         torch.manual_seed(seed)
@@ -52,6 +54,15 @@ def _git(*args: str) -> str:
                                        stderr=subprocess.DEVNULL).strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return "unavailable"
+
+
+def cache_provenance(directory: Path, params: dict) -> None:
+    """Record which code state produced a derived-data cache (prepared images, masks)."""
+    dirty = _git("status", "--porcelain")
+    write_json(Path(directory) / "_provenance.json", {
+        "created_utc": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+        "git_commit": _git("rev-parse", "HEAD"), "git_dirty": bool(dirty) and dirty != "unavailable",
+        "command": sys.argv, **params})
 
 
 def new_run(name: str, config: dict) -> Path:

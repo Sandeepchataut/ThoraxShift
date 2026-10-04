@@ -129,3 +129,24 @@ def test_gap_difference_zero_for_same_model():
     s_cross = s_in + np.random.default_rng(9).normal(size=len(y))
     r = M.gap_difference(y, s_in, s_cross, s_in, s_cross, n_boot=100)
     assert r["estimate"] == 0 and r["ci_low"] == 0 and r["ci_high"] == 0
+
+
+def test_holm_keeps_full_family_size_with_nan():
+    adj = M.holm([0.01, np.nan, 0.04, 0.03])
+    # m = 4: sorted 0.01*4=0.04, 0.03*3=0.09, 0.04*2=0.08 -> monotone 0.09, NaN (as 1) -> 1
+    np.testing.assert_allclose(adj[[0, 2, 3]], [0.04, 0.09, 0.09])
+    assert np.isnan(adj[1])
+
+
+def test_bootstrap_p_never_exactly_zero():
+    y, s = _data(n=400, sep=3.0, seed=11)
+    r = M.auc_difference(y, s, np.random.default_rng(0).normal(size=len(y)), n_boot=200)
+    assert 0 < r["boot_p"] <= 2 / 201 + 1e-12
+
+
+def test_relative_gap_is_descriptive_and_reports_nan_fraction():
+    y, s_in = _data(n=200, sep=0.2, seed=12)
+    s_cross = np.random.default_rng(13).normal(size=len(y))
+    r = M.transfer_gap(y, s_in, s_cross, n_boot=200)
+    assert r["relative_gap"]["p_boot"] is None and r["relative_gap"]["descriptive_only"]
+    assert 0.0 <= r["relative_gap"]["nan_fraction"] <= 1.0

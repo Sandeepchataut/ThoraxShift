@@ -18,7 +18,7 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tbshift import preprocess  # noqa: E402
-from tbshift.provenance import DATA_ROOT, new_run, resolve_data_path, write_json  # noqa: E402
+from tbshift.provenance import DATA_ROOT, cache_provenance, new_run, resolve_data_path, write_json  # noqa: E402
 from tbshift.segmentation import LungSegmenter, dice  # noqa: E402
 
 
@@ -56,9 +56,16 @@ def main() -> None:
                 raise SystemExit(f"{args.dataset} has no manual masks; --evaluate not possible")
             gt = preprocess.load_mask([resolve_data_path(m) for m in r["mask_paths"].split(";")], args.size)
             row["dice"] = dice(pred, gt)
+            inter = float((pred & gt).sum())
+            row["precision"] = inter / max(pred.sum(), 1)       # fraction of predicted lung that is lung
+            row["recall"] = inter / max(gt.sum(), 1)            # fraction of manual lung recovered
+            row["area_ratio"] = float(pred.sum() / max(gt.sum(), 1))
         rows.append(row)
 
     res = pd.DataFrame(rows)
+    cache_provenance(out, {"dataset": args.dataset, "size": args.size, "n_masks": len(res),
+                           "empty_masks": int((res.mask_area_frac == 0).sum()),
+                           "segmenter_weights_sha256": seg.weights_sha256})
     print(f"{len(res)} masks in {out}; empty masks: {(res.mask_area_frac == 0).sum()}")
     if args.evaluate:
         run = new_run(f"segmentation_dice_{args.dataset}",
@@ -66,6 +73,9 @@ def main() -> None:
         res.to_csv(run / "per_image.csv", index=False)
         summary = {"n": len(res), "dice_mean": res.dice.mean(), "dice_median": res.dice.median(),
                    "dice_min": res.dice.min(), "dice_q05": res.dice.quantile(0.05),
+                   "precision_mean": res.precision.mean(), "recall_mean": res.recall.mean(),
+                   "area_ratio_mean": res.area_ratio.mean(), "area_ratio_median": res.area_ratio.median(),
+                   "empty_masks": int((res.mask_area_frac == 0).sum()),
                    "by_label": res.groupby("label").dice.describe().to_dict()}
         write_json(run / "metrics.json", summary)
         print(f"Dice mean {summary['dice_mean']:.4f}, min {summary['dice_min']:.4f} -> {run}")

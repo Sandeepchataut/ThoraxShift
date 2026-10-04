@@ -100,13 +100,41 @@ class CXRDataset:
 
 
 def _loader(ds, recipe: DeepRecipe, shuffle: bool, seed: int, device):
+    """DataLoader whose shuffle order and worker seeds come from its generator. Reseed the
+    generator per epoch (see train) so a resumed run reproduces the same epoch order."""
     import torch
     g = torch.Generator()
     g.manual_seed(seed)
     return torch.utils.data.DataLoader(ds, batch_size=recipe.batch_size, shuffle=shuffle,
                                        num_workers=recipe.num_workers, generator=g,
                                        pin_memory=device.type == "cuda",
-                                       persistent_workers=recipe.num_workers > 0)
+                                       persistent_workers=False)
+
+
+def _atomic_save(obj, path: Path) -> None:
+    import torch
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    torch.save(obj, tmp)
+    tmp.replace(path)
+
+
+def _rng_state() -> dict:
+    import random
+
+    import torch
+    st = {"python": random.getstate(), "numpy": np.random.get_state(), "torch": torch.get_rng_state()}
+    if torch.cuda.is_available():
+        st["cuda"] = torch.cuda.get_rng_state_all()
+    return st
+
+
+def _set_rng_state(st: dict) -> None:
+    import random
+
+    import torch
+    random.setstate(st["python"]); np.random.set_state(st["numpy"]); torch.set_rng_state(st["torch"])
+    if "cuda" in st and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all(st["cuda"])
 
 
 def predict(model, rows, prepared_size: int, mask_mode: str, recipe: DeepRecipe, device) -> np.ndarray:
@@ -117,8 +145,8 @@ def predict(model, rows, prepared_size: int, mask_mode: str, recipe: DeepRecipe,
     dl = _loader(CXRDataset(rows, prepared_size, mask_mode, recipe, train=False), recipe, False, 0, device)
     with torch.no_grad():
         for x, _ in dl:
-            with torch.autocast(device.type, enabled=recipe.amp and device.type == "cuda"):
-                out.append(model(x.to(device, non_blocking=True)).float().squeeze(1).cpu().numpy())
+            # fp32 inference: half-precision logits would coarsen scores and create AUC ties.
+            out.append(model(x.to(device, non_blocking=True)).float().squeeze(1).cpu().numpy())
     return np.concatenate(out) if out else np.zeros(0)
 
 
@@ -150,10 +178,12 @@ def train(train_rows, val_rows, prepared_size: int, mask_mode: str, recipe: Deep
     start, best_auc, best_state, stale, history = 0, -np.inf, None, 0, []
     last = ckpt_dir / "last.pt"
     if last.exists():
-        ck = torch.load(last, map_location=device)
+        ck = torch.load(last, map_location=device, weights_only=False)
         model.load_state_dict(ck["model"]); opt.load_state_dict(ck["opt"])
         sched.load_state_dict(ck["sched"]); scaler.load_state_dict(ck["scaler"])
         start, best_auc, stale, history = ck["epoch"] + 1, ck["best_auc"], ck["stale"], ck["history"]
+        if "rng" in ck:
+            _set_rng_state(ck["rng"])
         best_state = torch.load(ckpt_dir / "best.pt", map_location="cpu") if (ckpt_dir / "best.pt").exists() else None
         log(f"resumed from epoch {ck['epoch']}")
 
@@ -162,6 +192,7 @@ def train(train_rows, val_rows, prepared_size: int, mask_mode: str, recipe: Deep
     for epoch in range(start, recipe.epochs):
         if stale >= recipe.patience:
             break
+        dl.generator.manual_seed(seed * 1000 + epoch)  # epoch order independent of resume
         model.train()
         t0, total, n = time.time(), 0.0, 0
         for x, y in dl:
@@ -179,15 +210,15 @@ def train(train_rows, val_rows, prepared_size: int, mask_mode: str, recipe: Deep
         if val_auc > best_auc:
             best_auc, stale = val_auc, 0
             best_state = copy.deepcopy({k: v.detach().cpu() for k, v in model.state_dict().items()})
-            torch.save(best_state, ckpt_dir / "best.pt")
+            _atomic_save(best_state, ckpt_dir / "best.pt")
         else:
             stale += 1
         history.append({"epoch": epoch, "train_loss": total / max(n, 1), "val_auc": val_auc,
                         "seconds": round(time.time() - t0, 1)})
         log(json.dumps(history[-1]))
-        torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "sched": sched.state_dict(),
-                    "scaler": scaler.state_dict(), "epoch": epoch, "best_auc": best_auc,
-                    "stale": stale, "history": history}, last)
+        _atomic_save({"model": model.state_dict(), "opt": opt.state_dict(), "sched": sched.state_dict(),
+                      "scaler": scaler.state_dict(), "epoch": epoch, "best_auc": best_auc,
+                      "stale": stale, "history": history, "rng": _rng_state()}, last)
 
     if best_state is not None:
         model.load_state_dict(best_state)

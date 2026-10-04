@@ -32,6 +32,8 @@ def _one(row: dict, mask_mode: str, size: int, scp, txp) -> dict:
     # scripts/segment_lungs.py). Manual masks are never model inputs.
     img = images.read_prepared(row["dataset"], row["image_id"], size)
     mask = images.read_mask(row["dataset"], row["image_id"], size) if mask_mode == "lung" else None
+    if mask_mode == "lung" and mask is None:
+        raise ValueError(f"empty lung mask for {row['dataset']}/{row['image_id']}")
     seed = zlib.crc32(row["image_id"].encode())
     s = sc.extract(img, mask, scp, seed)
     t = tx.extract(img, mask, txp)

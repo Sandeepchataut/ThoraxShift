@@ -18,8 +18,11 @@ change is reported as a deviation.
   is recorded), validated by Dice against the Montgomery manual masks. Manual masks are never
   model inputs.
 - **Primary: lung-masked inputs.** Shape context uses edges inside the lung mask dilated by
-  15 px ("thoracic region"). Texture descriptors are computed inside the lung mask. Deep
-  models see the image with everything outside the 15 px-dilated lung mask set to zero.
+  15 px ("thoracic region"). Texture descriptors are computed inside the lung mask (GLCM over
+  pixel pairs with both pixels in the lung; LBP and Gabor responses summarised over lung
+  pixels; HOG on the lung bounding box with out-of-lung pixels zeroed). Deep models see the
+  image with everything outside the 15 px-dilated lung mask set to zero.
+- An empty lung mask is an error, never a silent fallback to the unmasked image.
 - Unmasked inputs are used only as a shortcut ablation.
 
 ## Models (fixed in advance)
@@ -52,13 +55,20 @@ change is reported as a deviation.
 - **Primary:** for each target T ∈ {Shenzhen, TBX11K} and each source S ≠ T, the paired
   difference in out-of-domain AUC (FUSION − DenseNet-121) on the same target images. Tested with
   a paired DeLong test, confirmed with a paired stratified bootstrap (2,000 resamples), with Holm
-  correction across all primary (S, T) pairs.
+  correction across the four primary pairs (Montgomery→Shenzhen, TBX11K→Shenzhen,
+  Shenzhen→TBX11K, Montgomery→TBX11K). The family size is always 4: a pair that cannot be
+  computed counts as p = 1.
+- Decision rule: a primary pair is "significant" only if the Holm-adjusted DeLong p < 0.05
+  AND the bootstrap 95% CI excludes 0. If the two disagree, both are reported and the result
+  is described as not robust.
 - **Secondary (transfer gap):** G = AUC_in(T) − AUC_cross(S → T), both on the same T images
   (in-domain out-of-fold scores vs cross-domain scores), with a paired-bootstrap CI. Also
   reported:
-  - the relative gap G / (AUC_in(T) − 0.5);
+  - the relative gap G / (AUC_in(T) − 0.5), descriptive only (no test; the fraction of
+    undefined bootstrap resamples is reported);
   - the difference in G between the two model families (paired bootstrap over T);
-  - G with S subsampled (stratified) to the in-domain training size of T.
+  - G with S subsampled (stratified, seed 0) to the in-domain training size of T, i.e.
+    floor(4/5 · N_T). Defined only when this is smaller than N_S; otherwise not run.
 - Sensitivity and specificity at the source-chosen threshold, with Wilson 95% CIs.
 - Montgomery as a target is reported descriptively only (n = 138); it is not part of the
   Holm family.
@@ -68,7 +78,9 @@ change is reported as a deviation.
   abnormal) for each pair of datasets. All images are on the common 512 × 512 grid.
 - Fixed-capacity classifier: standardisation + L2 logistic regression with C = 1
   (class-balanced, never tuned). Out-of-fold balanced accuracy and AUC over 5-fold CV × 5
-  repeats.
+  repeats, with a 200-permutation label-shuffle null per representation (permutation p-value
+  and the null 95th percentile). The comparison of interest is masked vs unmasked within each
+  representation; representations differ in dimension, so their absolute levels are not ranked.
 - Representations: each hand-crafted family, FUSION, and frozen ImageNet DenseNet-121
   features (no training). Run on lung-masked and unmasked inputs.
 

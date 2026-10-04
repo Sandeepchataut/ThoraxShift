@@ -50,11 +50,21 @@ def lbp_features(img: np.ndarray, mask, p: TextureParams) -> np.ndarray:
 
 
 def glcm_features(img: np.ndarray, mask, p: TextureParams) -> np.ndarray:
+    """GLCM statistics over pixel pairs whose BOTH pixels lie inside the region.
+
+    Pixels inside the region are quantised to grey levels 1..L; pixels outside get level 0.
+    The co-occurrence matrix is computed with L+1 levels and the row/column of level 0 is
+    dropped, so pairs touching out-of-region pixels (mediastinum, spine, background) are excluded.
+    """
     region = _region(mask, img.shape)
-    crop = _bbox_crop(img, region)
-    q = np.minimum((np.clip(crop, 0, 1) * p.glcm_levels).astype(np.uint8), p.glcm_levels - 1)
-    glcm = feature.graycomatrix(q, p.glcm_distances, p.glcm_angles, levels=p.glcm_levels,
-                                symmetric=True, normed=True)
+    q = 1 + np.minimum((np.clip(img, 0, 1) * p.glcm_levels).astype(np.int64), p.glcm_levels - 1)
+    q = np.where(region, q, 0)
+    q = _bbox_crop(q, region).astype(np.uint8)
+    full = feature.graycomatrix(q, p.glcm_distances, p.glcm_angles, levels=p.glcm_levels + 1,
+                                symmetric=True, normed=False)
+    glcm = full[1:, 1:, :, :].astype(np.float64)
+    sums = glcm.sum(axis=(0, 1), keepdims=True)
+    glcm = np.divide(glcm, sums, out=np.zeros_like(glcm), where=sums > 0)
     props = ("contrast", "dissimilarity", "homogeneity", "energy", "correlation", "ASM")
     # Average over angles (approximate rotation invariance); keep distances separate.
     return np.concatenate([np.nan_to_num(feature.graycoprops(glcm, pr).mean(axis=1))

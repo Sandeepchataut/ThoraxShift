@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from tbshift.models.classical import BlockWeighter
-from tbshift.runs import run_identity, stratified_subsample
+from tbshift.runs import run_identity, size_matched_n, stratified_subsample
 
 
 def test_block_weighter_equalises_block_contribution():
@@ -30,3 +30,11 @@ def test_stratified_subsample_keeps_prevalence_and_is_seeded():
 def test_run_identity_validates_protocol():
     with pytest.raises(ValueError):
         run_identity("handcrafted", "sc", "indomain", "lung", "a", "b", None, 512)
+
+
+def test_size_matched_n_and_refusals():
+    assert size_matched_n(662, 138) == 110          # 4/5 of Montgomery
+    with pytest.raises(ValueError):
+        size_matched_n(138, 662)                    # Montgomery -> Shenzhen: not smaller than source
+    with pytest.raises(ValueError):
+        stratified_subsample(np.r_[np.zeros(5), np.ones(5)].astype(int), 10, seed=0)

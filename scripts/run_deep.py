@@ -27,7 +27,7 @@ from tbshift import runs  # noqa: E402
 from tbshift.data.images import manifest  # noqa: E402
 from tbshift.eval.metrics import youden_threshold  # noqa: E402
 from tbshift.models import deep  # noqa: E402
-from tbshift.provenance import new_run, write_json  # noqa: E402
+from tbshift.provenance import _git, new_run, write_json  # noqa: E402
 
 
 def rows_of(dataset: str, limit: int = 0):
@@ -51,7 +51,8 @@ def main() -> None:
     ap.add_argument("--dataset")
     ap.add_argument("--source")
     ap.add_argument("--target")
-    ap.add_argument("--source-subsample", type=int, default=0)
+    ap.add_argument("--size-matched", action="store_true",
+                    help="cross only: subsample the source to the target's in-domain training size")
     ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--prepared-size", type=int, default=512)
@@ -76,6 +77,12 @@ def main() -> None:
     modified = bool(overrides) or bool(args.limit)
     device = deep.pick_device(args.device)
 
+    args.source_subsample = 0
+    if args.size_matched:
+        if args.protocol != "cross":
+            raise SystemExit("--size-matched applies to cross runs only")
+        args.source_subsample = runs.size_matched_n(len(rows_of(args.source, args.limit)),
+                                                    len(rows_of(args.target, args.limit)))
     src = args.dataset if args.protocol == "indomain" else args.source
     tgt = args.dataset if args.protocol == "indomain" else args.target
     ident = runs.run_identity("deep", args.arch, args.protocol, args.mask, src, tgt,
@@ -90,7 +97,7 @@ def main() -> None:
         for c in (old, new):
             c.get("recipe", {}).pop("num_workers", None)  # performance only
         for k in ("arch", "protocol", "mask", "dataset", "source", "target", "source_subsample",
-                  "seeds", "folds", "recipe"):
+                  "seeds", "folds", "recipe", "prepared_size", "limit"):
             if old.get(k) != new.get(k):
                 raise SystemExit(f"--resume config mismatch on {k!r}: {old.get(k)} vs {new.get(k)}")
     else:
@@ -98,6 +105,17 @@ def main() -> None:
                 else f"deep_{args.arch}_{args.mask}_{src}-to-{tgt}"
                 + (f"_sub{args.source_subsample}" if args.source_subsample else ""))
         run = new_run(name + ("_SMOKE" if modified else "") + args.tag, config)
+    # Every session that writes into this run is recorded; resuming under different code is refused.
+    session = {"git_commit": _git("rev-parse", "HEAD"), "git_dirty": bool(_git("status", "--porcelain")),
+               "resumed": bool(args.resume)}
+    sessions_f = run / "sessions.jsonl"
+    if args.resume and sessions_f.exists():
+        first = json.loads(sessions_f.read_text().splitlines()[0])
+        if first["git_commit"] != session["git_commit"]:
+            raise SystemExit(f"refusing to resume: run started at commit {first['git_commit']}, "
+                             f"HEAD is {session['git_commit']}")
+    with open(sessions_f, "a") as f:
+        f.write(json.dumps(session) + chr(10))
     partial = run / "partial"
     partial.mkdir(exist_ok=True)
     log_f = open(run / "train_log.jsonl", "a")
@@ -116,7 +134,10 @@ def main() -> None:
             for k, (tr, te) in enumerate(outer.split(ids, y)):
                 part = partial / f"r{r_idx}_f{k}.csv"
                 if part.exists():
-                    p = pd.read_csv(part); oof[te] = p.score.to_numpy(); fold_of[te] = k
+                    p = pd.read_csv(part)
+                    if list(p.image_id.astype(str)) != list(ids[te].astype(str)):
+                        raise SystemExit(f"{part}: saved image ids do not match this fold")
+                    oof[te] = p.score.to_numpy(); fold_of[te] = k
                     continue
                 tr_rows, va_rows = split_train_val([rows[i] for i in tr], recipe.val_fraction, seed)
                 log(f"seed {seed} fold {k}: train {len(tr_rows)} val {len(va_rows)} test {len(te)}")
@@ -140,6 +161,8 @@ def main() -> None:
             part = partial / f"r{r_idx}.json"
             if part.exists():
                 saved = json.loads(part.read_text())
+                if saved.get("target_ids") != list(ids_t) or saved.get("val_ids") != [r[1] for r in va_rows]:
+                    raise SystemExit(f"{part}: saved image ids do not match this run")
                 s_t, s_va, thr = np.array(saved["target"]), np.array(saved["val"]), saved["threshold"]
             else:
                 log(f"seed {seed}: source train {len(tr_rows)} val {len(va_rows)} -> target {len(t_rows)}")
@@ -148,7 +171,8 @@ def main() -> None:
                 s_va = deep.predict(model, va_rows, args.prepared_size, args.mask, recipe, device)
                 thr = youden_threshold([r[2] for r in va_rows], s_va)
                 s_t = deep.predict(model, t_rows, args.prepared_size, args.mask, recipe, device)
-                part.write_text(json.dumps({"target": s_t.tolist(), "val": s_va.tolist(), "threshold": thr}))
+                part.write_text(json.dumps({"target": s_t.tolist(), "val": s_va.tolist(), "threshold": thr,
+                                            "target_ids": list(ids_t), "val_ids": [r[1] for r in va_rows]}))
             y_va = np.array([r[2] for r in va_rows])
             preds.append(runs.predictions_frame(ids_t, yt, s_t, r_idx))
             per_repeat.append({"repeat": r_idx, "seed": seed, "n_source_train": len(tr_rows),

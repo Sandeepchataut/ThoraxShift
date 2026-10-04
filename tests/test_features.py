@@ -80,3 +80,15 @@ def test_texture_fixed_length_and_finite(mask):
     b = tx.extract(np.full((128, 128), 0.5), m, p)  # constant image
     for k in a:
         assert a[k].shape == b[k].shape and np.isfinite(a[k]).all() and np.isfinite(b[k]).all()
+
+
+def test_glcm_ignores_pixels_outside_the_mask():
+    p = tx.TextureParams()
+    rng = np.random.default_rng(0)
+    img = np.full((96, 96), 0.5)
+    mask = np.zeros_like(img, bool); mask[20:70, 20:50] = True
+    img[mask] = rng.random(mask.sum())
+    a = tx.glcm_features(img, mask, p)
+    img2 = img.copy(); img2[~mask] = rng.random((~mask).sum())   # change only out-of-mask pixels
+    b = tx.glcm_features(img2, mask, p)
+    np.testing.assert_allclose(a, b)

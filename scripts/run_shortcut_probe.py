@@ -63,6 +63,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="auto")
     ap.add_argument("--no-cnn", action="store_true")
+    ap.add_argument("--n-perm", type=int, default=200, help="label-permutation null size")
     args = ap.parse_args()
 
     reps = [[f] for f in FEATURE_ORDER] + [FEATURE_ORDER]
@@ -84,11 +85,12 @@ def main() -> None:
                 Xb, yb, _ = data[(b, rep)]
                 for cls, cname in ((0, "normal"), (1, "abnormal")):
                     res = dataset_id_probe(Xa[ya == cls], Xb[yb == cls], repeats=args.repeats,
-                                           seed=args.seed, block_sizes=blocks)
+                                           seed=args.seed, block_sizes=blocks, n_perm=args.n_perm)
                     rows.append({"dataset_a": a, "dataset_b": b, "representation": rep, "mask": mask,
                                  "label_class": cname, **{k: v for k, v in res.items()
                                                           if k != "balanced_accuracy_per_repeat"}})
-                    print(f"{mask:4s} {cname:8s} {rep:24s} BA {res['balanced_accuracy_mean']:.3f}")
+                    print(f"{mask:4s} {cname:8s} {rep:24s} BA {res['balanced_accuracy_mean']:.3f} "
+                          f"(null q95 {res.get('null_ba_q95', float('nan')):.3f}, p {res.get('perm_p', float('nan')):.4f})")
     table = pd.DataFrame(rows)
     table.to_csv(run / "probe.csv", index=False)
     write_json(run / "metrics.json", {"model_family": "probe", "protocol": "dataset_id_probe",

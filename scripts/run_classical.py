@@ -53,8 +53,8 @@ def main() -> None:
     ap.add_argument("--dataset")
     ap.add_argument("--source")
     ap.add_argument("--target")
-    ap.add_argument("--source-subsample", type=int, default=0,
-                    help="cross only: train on a stratified random subsample of this size")
+    ap.add_argument("--size-matched", action="store_true",
+                    help="cross only: subsample the source to the target's in-domain training size")
     ap.add_argument("--size", type=int, default=512)
     ap.add_argument("--repeats", type=int, default=5, help="in-domain CV repeats")
     ap.add_argument("--seed", type=int, default=0)
@@ -88,6 +88,7 @@ def main() -> None:
     else:
         Xs, ys, _, blocks, hs = load(args.source, args.mask, args.size, feats)
         Xt, yt, ids_t, _, ht = load(args.target, args.mask, args.size, feats)
+        args.source_subsample = runs.size_matched_n(len(ys), len(yt)) if args.size_matched else 0
         keep = runs.stratified_subsample(ys, args.source_subsample, args.seed)
         Xs, ys = Xs[keep], ys[keep]
         ident = runs.run_identity("handcrafted", model, "cross", args.mask, args.source,

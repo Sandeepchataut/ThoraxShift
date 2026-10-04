@@ -38,11 +38,26 @@ def summarise(y, s, threshold=None) -> dict:
     return out
 
 
+def size_matched_n(n_source: int, n_target: int, folds: int = 5) -> int:
+    """Training-set size of one in-domain CV fold on the target: floor((folds-1)/folds * n_target).
+
+    Raises if this is not smaller than the source, because 'size-matched' would then be a
+    full-source run under another name.
+    """
+    n = (folds - 1) * n_target // folds
+    if n >= n_source:
+        raise ValueError(f"size-matched n={n} is not smaller than the source (n={n_source}); "
+                         "a size-matched run is not defined for this pair")
+    return n
+
+
 def stratified_subsample(y: np.ndarray, n: int, seed: int) -> np.ndarray:
-    """Indices of a class-stratified random subsample of size n (all indices if n >= len(y))."""
+    """Indices of a class-stratified random subsample of size n (n = 0 means all images)."""
     y = np.asarray(y).astype(int)
-    if not n or n >= len(y):
+    if not n:
         return np.arange(len(y))
+    if n >= len(y):
+        raise ValueError(f"subsample n={n} must be smaller than the source size {len(y)}")
     rng = np.random.default_rng(seed)
     out = []
     for c in (0, 1):

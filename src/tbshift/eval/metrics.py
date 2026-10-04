@@ -206,10 +206,17 @@ def paired_bootstrap(y_true, score_vectors, statistic, n_boot: int = 2000, seed:
     rng = np.random.default_rng(seed)
     boots = np.array([statistic(y[i], *[v[i] for v in vecs])
                       for i in stratified_bootstrap_indices(y, n_boot, rng)], dtype=float)
-    lo, hi = np.quantile(boots, [alpha / 2, 1 - alpha / 2])
-    p = float(min(1.0, 2 * min((boots <= 0).mean(), (boots >= 0).mean())))
+    finite = boots[np.isfinite(boots)]
+    nan_fraction = float(1 - len(finite) / len(boots))
+    if len(finite) == 0:
+        return {"estimate": point, "ci_low": float("nan"), "ci_high": float("nan"),
+                "p_boot": float("nan"), "n_boot": n_boot, "nan_fraction": nan_fraction, "seed": seed}
+    lo, hi = np.quantile(finite, [alpha / 2, 1 - alpha / 2])
+    # (k + 1) / (B + 1): a bootstrap p-value is never exactly 0.
+    b = len(finite)
+    p = float(min(1.0, 2 * min(((finite <= 0).sum() + 1) / (b + 1), ((finite >= 0).sum() + 1) / (b + 1))))
     return {"estimate": point, "ci_low": float(lo), "ci_high": float(hi), "p_boot": p,
-            "n_boot": n_boot, "seed": seed}
+            "n_boot": n_boot, "nan_fraction": nan_fraction, "seed": seed}
 
 
 def auc_difference(y_true, scores_a, scores_b, n_boot: int = 2000, seed: int = 0) -> dict:
@@ -238,6 +245,9 @@ def transfer_gap(y_target, scores_in_domain, scores_cross, n_boot: int = 2000, s
         return (auc_in - _auc(y, c)) / (auc_in - 0.5) if auc_in > 0.5 else np.nan
 
     relative = paired_bootstrap(y_target, [scores_in_domain, scores_cross], rel, n_boot, seed)
+    # Descriptive only: the ratio is unstable near AUC_in = 0.5, so no hypothesis test is reported.
+    relative["p_boot"] = None
+    relative["descriptive_only"] = True
     return {"auc_in_domain": _auc(y_target, scores_in_domain), "auc_cross": _auc(y_target, scores_cross),
             "gap": absolute, "relative_gap": relative}
 
@@ -250,17 +260,21 @@ def gap_difference(y_target, in_a, cross_a, in_b, cross_b, n_boot: int = 2000, s
 
 
 def holm(pvalues) -> np.ndarray:
-    """Holm-Bonferroni adjusted p-values (step-down, monotone, capped at 1). NaNs pass through."""
+    """Holm-Bonferroni adjusted p-values (step-down, monotone, capped at 1).
+
+    The family size m is ALWAYS the full length of the input. A NaN p-value (e.g. a test that
+    could not be computed) is treated as p = 1 for the correction, so it cannot make the other
+    tests more lenient, and its own adjusted value is returned as NaN.
+    """
     p = np.asarray(pvalues, dtype=float)
-    out = np.full_like(p, np.nan)
-    ok = ~np.isnan(p)
-    pv = p[ok]
+    nan = np.isnan(p)
+    pv = np.where(nan, 1.0, p)
     m = len(pv)
-    order = np.argsort(pv)
+    order = np.argsort(pv, kind="mergesort")
     adj = np.empty(m)
     running = 0.0
     for rank, idx in enumerate(order):
         running = max(running, (m - rank) * pv[idx])
         adj[idx] = min(1.0, running)
-    out[ok] = adj
-    return out
+    adj[nan] = np.nan
+    return adj
