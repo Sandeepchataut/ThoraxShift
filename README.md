@@ -1,4 +1,4 @@
-# tb-cxr-domain-shift
+# ThoraxShift
 
 ## Summary
 
