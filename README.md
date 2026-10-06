@@ -54,7 +54,7 @@ Prerequisites: `data/manifests/<dataset>.csv`, `data/prepared/<dataset>_s512/` a
 `scripts/segment_lungs.py`). Set `TBSHIFT_DATA` / `TBSHIFT_RUNS` to relocate data and runs.
 
 ```bash
-pip install -r requirements.txt && pip install -e . --no-deps
+pip install -r requirements.txt
 python -m pytest                                              # unit tests
 python scripts/extract_deep_features.py --prefetch            # download all backbone weights once
 python scripts/run_experiments.py --dry-run                   # what will run

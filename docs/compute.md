@@ -5,7 +5,7 @@ extraction and the MLP / attention heads use a CUDA GPU when one is visible.
 
 1. Copy `data/manifests/`, `data/prepared/` and `data/masks/` to the machine (or build them there)
    and set `TBSHIFT_DATA` to that data root. Set `TBSHIFT_RUNS` to persistent storage.
-2. `pip install -r requirements.txt` then `pip install -e . --no-deps`.
+2. `pip install -r requirements.txt`.
 3. Download every backbone once (Hugging Face Hub, timm and TorchXRayVision caches):
    `python scripts/extract_deep_features.py --prefetch`. For an offline node, run this on a
    connected machine and copy `~/.cache/huggingface` and `~/.torchxrayvision`, then set
