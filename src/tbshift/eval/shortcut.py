@@ -35,8 +35,12 @@ def _oof_scores(X, d, n_splits, seed, block_sizes):
     return oof
 
 
+def _null_ba(X, dp, n_splits, seed, block_sizes) -> float:
+    return balanced_accuracy_score(dp, (_oof_scores(X, dp, n_splits, seed, block_sizes) > 0).astype(int))
+
+
 def dataset_id_probe(X_a: np.ndarray, X_b: np.ndarray, n_splits: int = 5, repeats: int = 5,
-                     seed: int = 0, block_sizes=None, n_perm: int = 200) -> dict:
+                     seed: int = 0, block_sizes=None, n_perm: int = 200, n_jobs: int = 1) -> dict:
     """Out-of-fold balanced accuracy and AUC for 'dataset A vs dataset B', repeated CV,
     with a label-permutation null.
 
@@ -62,9 +66,11 @@ def dataset_id_probe(X_a: np.ndarray, X_b: np.ndarray, n_splits: int = 5, repeat
            "auc_mean": float(np.mean(aucs)),
            "balanced_accuracy_per_repeat": [float(v) for v in bas]}
     if n_perm:
+        from joblib import Parallel, delayed
         rng = np.random.default_rng(seed + 99_991)
-        null = np.array([balanced_accuracy_score(dp, (_oof_scores(X, dp, n_splits, seed, block_sizes) > 0).astype(int))
-                         for dp in (rng.permutation(d) for _ in range(n_perm))])
+        perms = [rng.permutation(d) for _ in range(n_perm)]      # drawn up front: n_jobs-invariant
+        null = np.array(Parallel(n_jobs=n_jobs)(delayed(_null_ba)(X, dp, n_splits, seed, block_sizes)
+                                                for dp in perms))
         out.update({"n_perm": n_perm, "null_ba_mean": float(null.mean()),
                     "null_ba_q95": float(np.quantile(null, 0.95)),
                     "perm_p": float(((null >= bas[0]).sum() + 1) / (n_perm + 1))})

@@ -2,8 +2,8 @@
 
     python scripts/run_shortcut_probe.py --datasets montgomery shenzhen
 
-Representations: every hand-crafted family and their fusion (from the feature caches), plus frozen
-ImageNet DenseNet-121 features (global-average-pooled, computed here and cached). Each is probed
+Representations: every hand-crafted family and their fusion (from the feature caches), plus the
+pooled features of every frozen backbone (from scripts/extract_deep_features.py). Each is probed
 on lung-masked and unmasked inputs, separately for normal and abnormal images.
 """
 import argparse
@@ -18,39 +18,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from run_classical import FEATURE_ORDER, load  # noqa: E402
 
-from tbshift.data.images import manifest  # noqa: E402
+from tbshift import deep_features as dfc  # noqa: E402
+from tbshift.models import backbones as bb  # noqa: E402
 from tbshift.eval.shortcut import PROBE_C, dataset_id_probe  # noqa: E402
-from tbshift.provenance import DATA_ROOT, new_run, write_json  # noqa: E402
+from tbshift.provenance import new_run, write_json  # noqa: E402
 
 
-def frozen_cnn_features(dataset: str, mask: str, prepared_size: int, input_size: int, device: str):
-    """(features, labels, ids) from an ImageNet DenseNet-121 with no training (cached)."""
-    cache = DATA_ROOT / "features" / f"frozen-densenet121_{dataset}_mask-{mask}_in{input_size}.npz"
-    if cache.exists():
-        f = np.load(cache)
-        return f["X"], f["label"], f["image_id"]
-    import torch
-    import torchvision.models as tvm
-
-    from tbshift.models.deep import CXRDataset, DeepRecipe, pick_device
-
-    dev = pick_device(device)
-    m = tvm.densenet121(weights=tvm.DenseNet121_Weights.IMAGENET1K_V1)
-    m.classifier = torch.nn.Identity()
-    m = m.eval().to(dev)
-    df = manifest(dataset)
-    rows = [(dataset, r.image_id, int(r.label)) for r in df.itertuples()]
-    recipe = DeepRecipe(input_size=input_size, num_workers=0)
-    ds = CXRDataset(rows, prepared_size, mask, recipe, train=False)
-    feats = []
-    with torch.no_grad():
-        for i in range(0, len(ds), 16):
-            x = torch.stack([ds[j][0] for j in range(i, min(i + 16, len(ds)))]).to(dev)
-            feats.append(m(x).cpu().numpy())
-    X = np.vstack(feats)
-    y = np.array([r[2] for r in rows]); ids = np.array([r[1] for r in rows])
-    np.savez_compressed(cache, X=X, label=y, image_id=ids)
-    return X, y, ids
+def frozen_features(backbone: str, dataset: str, mask: str, size: int):
+    """(pooled features, labels, ids) of a frozen backbone, from the deep-feature cache."""
+    X, y, ids = dfc.load(backbone, dataset, mask, size, kind="pooled")
+    return np.asarray(X, dtype=np.float64), y, ids
 
 
 def main() -> None:
@@ -58,12 +35,12 @@ def main() -> None:
     ap.add_argument("--datasets", nargs="+", required=True)
     ap.add_argument("--masks", nargs="+", default=["lung", "none"])
     ap.add_argument("--size", type=int, default=512)
-    ap.add_argument("--cnn-input-size", type=int, default=384)
+    ap.add_argument("--backbones", nargs="+", default=["all"])
     ap.add_argument("--repeats", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--device", default="auto")
-    ap.add_argument("--no-cnn", action="store_true")
+    ap.add_argument("--no-deep", action="store_true")
     ap.add_argument("--n-perm", type=int, default=200, help="label-permutation null size")
+    ap.add_argument("--jobs", type=int, default=-1, help="parallel workers for the permutation null")
     args = ap.parse_args()
 
     reps = [[f] for f in FEATURE_ORDER] + [FEATURE_ORDER]
@@ -75,9 +52,10 @@ def main() -> None:
             for rep in reps:
                 X, y, _, blocks, _ = load(ds, mask, args.size, rep)
                 data[(ds, "+".join(rep))] = (X, y, blocks if len(rep) > 1 else None)
-            if not args.no_cnn:
-                X, y, _ = frozen_cnn_features(ds, mask, args.size, args.cnn_input_size, args.device)
-                data[(ds, "frozen-densenet121")] = (X, y, None)
+            if not args.no_deep:
+                for spec in bb.resolve(args.backbones):
+                    X, y, _ = frozen_features(spec.name, ds, mask, args.size)
+                    data[(ds, f"frozen-{spec.name}")] = (X, y, None)
         rep_names = sorted({k[1] for k in data})
         for a, b in itertools.combinations(args.datasets, 2):
             for rep in rep_names:
@@ -85,7 +63,8 @@ def main() -> None:
                 Xb, yb, _ = data[(b, rep)]
                 for cls, cname in ((0, "normal"), (1, "abnormal")):
                     res = dataset_id_probe(Xa[ya == cls], Xb[yb == cls], repeats=args.repeats,
-                                           seed=args.seed, block_sizes=blocks, n_perm=args.n_perm)
+                                           seed=args.seed, block_sizes=blocks, n_perm=args.n_perm,
+                                           n_jobs=args.jobs)
                     rows.append({"dataset_a": a, "dataset_b": b, "representation": rep, "mask": mask,
                                  "label_class": cname, **{k: v for k, v in res.items()
                                                           if k != "balanced_accuracy_per_repeat"}})

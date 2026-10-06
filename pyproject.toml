@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tbshift"
 version = "0.1.0"
-description = "Cross-site robustness of hand-crafted vs deep representations for TB chest X-ray screening"
+description = "Cross-site robustness of hand-crafted vs frozen deep representations for TB chest X-ray screening"
 license = { text = "MIT" }
 requires-python = ">=3.11,<3.12"
 # Direct dependencies, pinned. requirements.txt is the full lock of the tested environment.
@@ -24,6 +24,8 @@ dependencies = [
     "torch==2.3.1",
     "torchvision==0.18.1",
     "torchxrayvision==1.2.4",
+    "timm==1.0.9",
+    "transformers==4.44.2",
 ]
 
 [project.optional-dependencies]

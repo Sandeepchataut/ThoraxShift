@@ -3,7 +3,8 @@ __pycache__/
 *.pyc
 *.egg-info/
 .pytest_cache/
-data/
-outputs/
+# Anchored to the repository root: an unanchored "data/" also ignored src/tbshift/data/.
+/data/
+/outputs/
 docs/private/
 *.part
