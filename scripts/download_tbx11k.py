@@ -6,7 +6,7 @@ Usage:
 TBX11K has no public direct download (Google Drive / Baidu / Kaggle, all behind a login), so
 the raw data is expected under data/raw/tbx11k/ in either layout:
 
-    original release (mmcheng.net/tb):  .../imgs/{health,sick,tb}/*.png
+    original release (mmcheng.net/tb):  [.../imgs/]{health,sick,tb}/*.png
     Kaggle "tbx11k-simplified":         .../data.csv + .../images/*.png
 
 If neither is there and the kaggle CLI is configured (~/.kaggle/kaggle.json), the simplified
@@ -16,6 +16,8 @@ Labels (TB-related abnormality vs normal, docs/analysis_plan.md): tb (active + l
 health = 0, sick-but-non-TB excluded by default (--sick negative counts it as 0). The manifest
 keeps the source category in a "category" column.
 """
+from __future__ import annotations
+
 import argparse
 import shutil
 import subprocess
@@ -52,7 +54,9 @@ def _category(value: str) -> str:
 
 
 def _from_original(root: Path) -> pd.DataFrame | None:
-    imgs = next((p for p in root.rglob("imgs") if p.is_dir() and (p / "health").is_dir()), None)
+    # health/sick/tb either directly under root or inside the release's imgs/ folder
+    candidates = [root, *sorted(p.parent for p in root.rglob("health") if p.is_dir())]
+    imgs = next((p for p in candidates if all((p / c).is_dir() for c in CATEGORIES)), None)
     if imgs is None:
         return None
     rows = [{"image_id": f"{c}_{p.stem}", "category": c, "path": _rel(p)}
