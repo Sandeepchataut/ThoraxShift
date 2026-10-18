@@ -145,6 +145,8 @@ def main() -> None:
                                       device, run / "ckpt" / f"r{r_idx}_f{k}", log)
                 s = deep.predict(model, [rows[i] for i in te], args.prepared_size, args.mask, recipe, device)
                 pd.DataFrame({"image_id": ids[te], "score": s}).to_csv(part, index=False)
+                # Fold finished: drop the resume checkpoint, keep best.pt.
+                (run / "ckpt" / f"r{r_idx}_f{k}" / "last.pt").unlink(missing_ok=True)
                 oof[te] = s; fold_of[te] = k
             preds.append(runs.predictions_frame(ids, y, oof, r_idx, fold_of))
             per_repeat.append({"repeat": r_idx, "seed": seed, **runs.summarise(y, oof)})
@@ -173,6 +175,7 @@ def main() -> None:
                 s_t = deep.predict(model, t_rows, args.prepared_size, args.mask, recipe, device)
                 part.write_text(json.dumps({"target": s_t.tolist(), "val": s_va.tolist(), "threshold": thr,
                                             "target_ids": list(ids_t), "val_ids": [r[1] for r in va_rows]}))
+                (run / "ckpt" / f"r{r_idx}" / "last.pt").unlink(missing_ok=True)
             y_va = np.array([r[2] for r in va_rows])
             preds.append(runs.predictions_frame(ids_t, yt, s_t, r_idx))
             per_repeat.append({"repeat": r_idx, "seed": seed, "n_source_train": len(tr_rows),
