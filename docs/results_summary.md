@@ -25,7 +25,7 @@ Section 9 gives the cross-dataset results as secondary data.
 | Self-supervised, natural images (`ssl_natural`) | DINOv2 ViT-S/14, DINOv2 ViT-B/14 |
 | Chest X-ray pretrained (`cxr`) | DenseNet-121 (TorchXRayVision), RAD-DINO ViT-B/14 |
 
-All deep backbones are frozen. Only a classifier head learns from the data.
+All deep backbones are frozen. Only a classifier head learns from the data. This is the usual method of transfer learning for small medical datasets.
 There are four heads: RBF-SVM, logistic regression, MLP, and attention pooling.
 The hand-crafted models use an RBF-SVM. This is the same classifier and the same search grid as the deep RBF-SVM head.
 
@@ -227,7 +227,7 @@ Read these points before you use the results.
 2. **A probe can identify the dataset of each image.** A dataset-identification probe has a balanced accuracy of 0.95 or more for most features. It has this accuracy also with lung masks, and also within one class (TB only or normal only). All 216 probe results are significant (permutation p < 0.005). The datasets thus have strong differences that are not related to TB. These differences can also exist between the TB and healthy images in one dataset. The very high TBX11K AUC can be an example of this.
 3. **Montgomery is small (n = 138).** The confidence intervals are wide. Some of the large differences on Montgomery (for example ViT-S against ViT-B, +0.213) are not reliable.
 4. **The input resolution is not the same for all models.** The DINOv2 and RAD-DINO models use 518 px. The other models use 224 px. Some of the advantage of these models can come from the resolution.
-5. **No fine-tuned reference exists.** The fine-tuning stage did not run. `tables/finetune_reference.csv` is empty. The results thus compare frozen features only.
+5. **The optional full fine-tuning ablation did not run.** This is the planned design. Each deep model is a frozen backbone with a trained classifier head (792 trained runs). The pipeline also has an optional ablation that trains all layers of DenseNet-121. This ablation runs only with `--with-finetune`. The jobs did not use this flag. Thus `tables/finetune_reference.csv` is empty.
 6. **The folder has no model checkpoint files.** A search for `.pt`, `.pth` and `.ckpt` files found none.
 7. **The in-domain paired tests are not in the aggregation output.** The aggregation script tests only cross-dataset comparisons. The tests in sections 3 and 4.2 were calculated for this summary. The method is the same as the aggregation: `tbshift.eval.metrics.auc_difference` on the run directories listed in `inputs.json` of the aggregation run. The repeat-0 folds are the same for the hand-crafted runs and the deep runs.
 8. **TBX11K labels.** The "sick but not TB" class is not in the data. A different label rule can change the TBX11K results.
