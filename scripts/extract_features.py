@@ -15,7 +15,6 @@ from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 from joblib import Parallel, delayed
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -52,7 +51,7 @@ def main() -> None:
     ap.add_argument("--jobs", type=int, default=-1)
     args = ap.parse_args()
 
-    df = pd.read_csv(DATA_ROOT / "manifests" / f"{args.dataset}.csv")
+    df = images.manifest(args.dataset)
     if args.limit:
         df = df.head(args.limit)
     scp, txp = sc.ShapeContextParams(), tx.TextureParams()

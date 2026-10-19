@@ -185,8 +185,16 @@ def threshold_metrics(y_true, scores, threshold: float) -> dict:
 # ---------------------------------------------------------------------------------------------
 
 def _auc(y, s) -> float:
-    from sklearn.metrics import roc_auc_score
-    return float(roc_auc_score(y, s))
+    """ROC AUC via the Mann-Whitney rank statistic (midranks for ties): identical to
+    sklearn.metrics.roc_auc_score but several times faster inside bootstrap loops."""
+    y = np.asarray(y)
+    pos = y == 1
+    n1 = int(pos.sum())
+    n0 = len(y) - n1
+    if n1 == 0 or n0 == 0:
+        raise ValueError("AUC needs both classes")
+    r = stats.rankdata(np.asarray(s, dtype=float))
+    return float((r[pos].sum() - n1 * (n1 + 1) / 2.0) / (n1 * n0))
 
 
 def paired_bootstrap(y_true, score_vectors, statistic, n_boot: int = 2000, seed: int = 0,

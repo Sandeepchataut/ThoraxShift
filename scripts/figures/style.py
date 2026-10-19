@@ -22,6 +22,18 @@ INK, INK_2, GRID = "#0b0b0b", "#52514e", "#e4e3df"
 SEQ = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"]
 DATASET_LABEL = {"shenzhen": "Shenzhen", "montgomery": "Montgomery", "tbx11k": "TBX11K"}
 
+# Representation groups for the backbone benchmark (categorical slots 1, 2, 3, 5, 7; validated for
+# adjacent use, CVD dE 6.1 worst pair -> always paired with a marker shape and a text label).
+GROUP = {"handcrafted": "#2a78d6", "cnn_in1k": "#eb6834", "vit_in1k": "#1baf7a",
+         "ssl_natural": "#e87ba4", "cxr": "#4a3aa7"}
+GROUP_LABEL = {"handcrafted": "Hand-crafted (FUSION)", "cnn_in1k": "ImageNet CNN",
+               "vit_in1k": "ImageNet transformer", "ssl_natural": "Self-supervised (natural)",
+               "cxr": "Chest X-ray pretrained"}
+GROUP_MARKER = {"handcrafted": "o", "cnn_in1k": "s", "vit_in1k": "^", "ssl_natural": "D", "cxr": "P"}
+# Transfer pairs (categorical slots 1-4, in fixed order)
+PAIR_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]
+PAIR_MARKERS = ["o", "s", "^", "D"]
+
 # IEEE two-column widths (inches)
 COL, FULL = 3.5, 7.16
 
