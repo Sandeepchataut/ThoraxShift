@@ -9,5 +9,3 @@ __pycache__/
 docs/private/
 *.part
 .DS_Store
-src/tbshift/data/data/raw/tbx11k/
-src/tbshift/data/
